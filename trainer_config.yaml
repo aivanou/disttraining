@@ -1,0 +1,15 @@
+trainer:
+  max_epochs: 2
+  lr: 0.0006
+  lr_decay: True
+  batch_size: 256
+  data_loader_workers: 4
+  enable_profile: False
+model:
+  n_layer: 8
+  n_head: 8
+  n_embd: 512
+
+hydra:
+  run:
+    dir: ./

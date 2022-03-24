@@ -1,1 +1,1 @@
-# disttraining
+TODO: ADD readme

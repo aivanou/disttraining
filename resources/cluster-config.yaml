@@ -1,0 +1,48 @@
+Region: us-west-2
+Image:
+  Os: ubuntu1804
+HeadNode:
+  InstanceType: c4.xlarge
+  Networking:
+    SubnetId: subnet-c2b5bcbb
+  Ssh:
+    KeyName: aivanou-pem
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: test
+      ComputeResources:
+        - Name: p38xlarge
+          InstanceType: p3.8xlarge
+          MinCount: 0
+          MaxCount: 10
+        - Name: p32xlarge
+          InstanceType: p3.2xlarge
+          MinCount: 0
+          MaxCount: 10
+      Networking:
+        SubnetIds:
+          - subnet-c2b5bcbb
+Monitoring:
+  DetailedMonitoring: true
+  Logs:
+    CloudWatch:
+      Enabled: true
+      RetentionInDays: 14
+  Dashboards:
+    CloudWatch:
+      Enabled: true
+SharedStorage:
+  - MountDir: /shared
+    Name: shared-fs
+    StorageType: FsxLustre
+    FsxLustreSettings:
+      StorageCapacity: 1200
+      DeploymentType: SCRATCH_1
+      #      FileSystemId: string
+      StorageType: SSD
+
+
+Tags:
+  - Key: cluster
+    Value: aivanou-test
