@@ -1,13 +1,13 @@
 import os
 from typing import Optional, Tuple
-from mingpt.model import GPT, GPTConfig
+from mingpt.model import GPT, GPTConfig, OptimizerConfig, create_optimizer
 from mingpt.trainer import Trainer, TrainerConfig
+from mingpt.char_dataset import CharDataset
 from mingpt.utils import sample
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
 import uuid
 
-from torch.utils.data import Dataset
 import torch
 import socket
 from omegaconf import DictConfig
@@ -17,32 +17,6 @@ import hydra
 
 def get_fq_hostname() -> str:
     return socket.getfqdn(socket.gethostname())
-
-
-class CharDataset(Dataset):
-
-    def __init__(self, data, block_size):
-        chars = sorted(list(set(data)))
-        data_size, vocab_size = len(data), len(chars)
-        print('data has %d characters, %d unique.' % (data_size, vocab_size))
-
-        self.stoi = {ch: i for i, ch in enumerate(chars)}
-        self.itos = {i: ch for i, ch in enumerate(chars)}
-        self.block_size = block_size
-        self.vocab_size = vocab_size
-        self.data = data
-
-    def __len__(self):
-        return len(self.data) - self.block_size
-
-    def __getitem__(self, idx):
-        # grab a chunk of (block_size + 1) characters from the data
-        chunk = self.data[idx:idx + self.block_size + 1]
-        # encode every character to an integer
-        dix = [self.stoi[s] for s in chunk]
-        x = torch.tensor(dix[:-1], dtype=torch.long)
-        y = torch.tensor(dix[1:], dtype=torch.long)
-        return x, y
 
 
 def set_env():
@@ -65,10 +39,17 @@ def get_device() -> Optional[int]:
     return int(os.environ['LOCAL_RANK'])
 
 
-def get_model_and_optimizer(gpt_config: GPTConfig, trainer_config: TrainerConfig) -> Tuple[
-    torch.nn.Module, torch.optim.Optimizer]:
+def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, trainer_config: TrainerConfig) \
+        -> Tuple[torch.nn.Module, torch.optim.Optimizer, int]:
     model = GPT(gpt_config)
-    optimizer = model.configure_optimizers(trainer_config)
+    optimizer = create_optimizer(model, opt_config)
+    start_epoch = 0
+    if trainer_config.checkpoint_path and os.path.exists(trainer_config.checkpoint_path):
+        checkpoint = torch.load(trainer_config.checkpoint_path, map_location="cpu")
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch']
+
     device = get_device()
     device_ids = None
     if device is not None:
@@ -79,7 +60,7 @@ def get_model_and_optimizer(gpt_config: GPTConfig, trainer_config: TrainerConfig
         device_ids=device_ids,
         find_unused_parameters=True,
     )
-    return model, optimizer
+    return model, optimizer, start_epoch
 
 
 def setup_process_group() -> None:
@@ -92,11 +73,19 @@ def setup_process_group() -> None:
         dist.init_process_group("gloo", rank=rank, world_size=world_size)
 
 
+def generate_seq(cfg: DictConfig, model: torch.nn.Module, dataset: CharDataset) -> None:
+    if dist.get_rank() == 0:
+        device = get_device()
+        context = cfg['charnn']['phrase']
+        x = torch.tensor([dataset.stoi[s] for s in context], dtype=torch.long)[None, ...].to(device)
+        y = sample(model, x, 2000, temperature=1.0, sample=True, top_k=10)[0]
+        completion = ''.join([dataset.itos[int(i)] for i in y])
+        print(completion)
+
+
 @hydra.main(config_path=".", config_name="trainer_config")
 def main(cfg: DictConfig):
     set_env()
-    os.getcwd()
-    text = open('./data/input.txt', 'r').read()
     device = get_device()
     print(f"{get_fq_hostname()}:{os.getpid()}:{device} Running charNN")
     if device is not None:
@@ -104,33 +93,33 @@ def main(cfg: DictConfig):
     setup_process_group()
 
     block_size = 128  # spatial extent of the model for its context
-    train_dataset = CharDataset(text, block_size)  # one line of poem is roughly 50 characters
+    train_dataset = CharDataset('./data/input.txt', block_size)
 
-    mconf = GPTConfig(train_dataset.vocab_size, train_dataset.block_size,
+    opt_conf = OptimizerConfig(lr=cfg['opt']['lr'], weight_decay=cfg['opt']['weight_decay'])
+
+    mconf = GPTConfig(vocab_size=train_dataset.vocab_size,
+                      block_size=train_dataset.block_size,
                       n_layer=cfg['model']['n_layer'],
                       n_head=cfg['model']['n_head'],
                       n_embd=cfg['model']['n_embd'])
 
-    tconf = TrainerConfig(max_epochs=cfg['trainer']['max_epochs'],
-                          batch_size=cfg['trainer']['batch_size'],
-                          learning_rate=cfg['trainer']['lr'],
-                          lr_decay=cfg['trainer']['lr_decay'],
-                          warmup_tokens=512 * 20,
-                          final_tokens=2 * len(train_dataset) * block_size,
-                          data_loader_workers=cfg['trainer']['data_loader_workers'],
-                          enable_profile=cfg['trainer']['enable_profile'],
-                          log_dir=cfg['trainer'].get('log_dir'),
+    train_cfg = cfg['trainer']
+    tconf = TrainerConfig(max_epochs=train_cfg['max_epochs'],
+                          batch_size=train_cfg['batch_size'],
+                          data_loader_workers=train_cfg['data_loader_workers'],
+                          enable_profile=train_cfg['enable_profile'],
+                          log_dir=train_cfg.get('log_dir'),
+                          checkpoint_path=train_cfg.get("checkpoint_path"),
                           )
-    model, optimizer = get_model_and_optimizer(mconf, tconf)
+    model, optimizer, start_epoch = get_model_and_optimizer(mconf, opt_conf, tconf)
 
-    trainer = Trainer(model, optimizer, train_dataset, tconf, device)
-    trainer.fit()
-    if dist.get_rank() == 0:
-        context = "Hello my"
-        x = torch.tensor([train_dataset.stoi[s] for s in context], dtype=torch.long)[None, ...].to(device)
-        y = sample(model, x, 2000, temperature=1.0, sample=True, top_k=10)[0]
-        completion = ''.join([train_dataset.itos[int(i)] for i in y])
-        print(completion)
+    if cfg['charnn']['task'] == 'train':
+        trainer = Trainer(model, optimizer, train_dataset, tconf, device, start_epoch)
+        trainer.fit()
+    elif cfg['charnn']['task'] == 'generate':
+        generate_seq(cfg, model, train_dataset)
+    else:
+        raise RuntimeError(f"Unknown task: {cfg['charnn']['task']}")
 
 
 if __name__ == "__main__":
