@@ -93,10 +93,17 @@ python3 -m pip install setuptools==59.5.0
 pip install -r requirements.txt
 ```
 
+Copy the data from S3 bucket to the shared fs:
+
+```bash
+mkdir /shared/data && cd /shared/data
+aws s3 cp s3://#YOUR_BUCKET_NAME/charnn/data/input.txt ./
+```
+
 Now we can run our training job via the following cmd:
 
 ```bash
-export S3_BUCKET_NAME=#YOUR_BUCKET_NAME
+cd /shared/code/disttrain
 sbatch ./slurm/slurm_sbatch_run.sh
 ```
 

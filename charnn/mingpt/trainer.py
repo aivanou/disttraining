@@ -61,14 +61,6 @@ class Trainer:
                 'optimizer_state_dict': self.optimizer.state_dict(),
             }, self.config.checkpoint_path)
 
-    def _try_load_checkpoint(self) -> None:
-        if self.config.checkpoint_path and os.path.exists(self.config.checkpoint_path):
-            checkpoint = torch.load(self.config.checkpoint_path, map_location="cpu")
-            model = self._get_raw_model()
-            model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.start_epoch = checkpoint['epoch']
-
     def _get_tb_writer(self) -> Optional[SummaryWriter]:
         if self.config.log_dir:
             return SummaryWriter(log_dir=self.config.log_dir)
@@ -121,6 +113,8 @@ class Trainer:
                 self.run_batch(epoch, it, x, y)
                 if prof:
                     prof.step()
+                if it == 20:
+                    break
             self._try_save_checkpoint(epoch)
 
         finally:

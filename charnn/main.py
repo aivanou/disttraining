@@ -1,6 +1,5 @@
 import os
-import sys
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Dict
 from mingpt.model import GPT, GPTConfig, OptimizerConfig, create_optimizer
 from mingpt.trainer import Trainer, TrainerConfig
 from mingpt.char_dataset import CharDataset
@@ -40,26 +39,32 @@ def get_device() -> Optional[int]:
     return int(os.environ['LOCAL_RANK'])
 
 
+def _try_load_checkpoint(checkpoint_path: Optional[str]) -> Optional[Dict[str, Any]]:
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        return torch.load(checkpoint_path, map_location="cpu")
+    else:
+        return None
+
+
 def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, trainer_config: TrainerConfig) \
         -> Tuple[torch.nn.Module, torch.optim.Optimizer, int]:
+    checkpoint = _try_load_checkpoint(trainer_config.checkpoint_path)
     model = GPT(gpt_config)
-    optimizer = create_optimizer(model, opt_config)
     start_epoch = 0
-    if trainer_config.checkpoint_path and os.path.exists(trainer_config.checkpoint_path):
-        checkpoint = torch.load(trainer_config.checkpoint_path, map_location="cpu")
+    if checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']
-
     device = get_device()
     device_ids = None
     if device is not None:
         model = model.to(device)
         device_ids = [device]
+    optimizer = create_optimizer(model, opt_config)
+    if checkpoint:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     model = DistributedDataParallel(
         model,
         device_ids=device_ids,
-        find_unused_parameters=True,
     )
     return model, optimizer, start_epoch
 

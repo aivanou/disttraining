@@ -1,5 +1,6 @@
 hydra-core
 fsspec
+s3fs
 numpy
 tensorboard
 torch>=1.10.0
