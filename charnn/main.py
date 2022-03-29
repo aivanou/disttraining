@@ -1,7 +1,7 @@
 import os
 from typing import Optional, Tuple, Any, Dict
 from mingpt.model import GPT, GPTConfig, OptimizerConfig, create_optimizer
-from mingpt.trainer import Trainer, TrainerConfig
+from mingpt.trainer import Trainer, TrainerConfig, Checkpoint, load_checkpoint
 from mingpt.char_dataset import CharDataset
 from mingpt.utils import sample
 from torch.nn.parallel import DistributedDataParallel
@@ -39,21 +39,13 @@ def get_device() -> Optional[int]:
     return int(os.environ['LOCAL_RANK'])
 
 
-def _try_load_checkpoint(checkpoint_path: Optional[str]) -> Optional[Dict[str, Any]]:
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        return torch.load(checkpoint_path, map_location="cpu")
-    else:
-        return None
-
-
-def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, trainer_config: TrainerConfig) \
-        -> Tuple[torch.nn.Module, torch.optim.Optimizer, int]:
-    checkpoint = _try_load_checkpoint(trainer_config.checkpoint_path)
+def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, checkpoint: Optional[Checkpoint]) \
+        -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    # Create new GPT Model on CPU
     model = GPT(gpt_config)
-    start_epoch = 0
+    # Load GPT model from checkpoint if present
     if checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint.model_state)
     device = get_device()
     device_ids = None
     if device is not None:
@@ -61,12 +53,12 @@ def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, 
         device_ids = [device]
     optimizer = create_optimizer(model, opt_config)
     if checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        optimizer.load_state_dict(checkpoint.optimizer_state)
     model = DistributedDataParallel(
         model,
         device_ids=device_ids,
     )
-    return model, optimizer, start_epoch
+    return model, optimizer
 
 
 def setup_process_group() -> None:
@@ -128,10 +120,12 @@ def main(cfg: DictConfig):
                           enable_profile=train_cfg['enable_profile'],
                           log_dir=train_cfg.get('log_dir'),
                           checkpoint_path=train_cfg.get("checkpoint_path"), )
-    model, optimizer, start_epoch = get_model_and_optimizer(mconf, opt_conf, tconf)
+    checkpoint = load_checkpoint(tconf.checkpoint_path)
+    model, optimizer = get_model_and_optimizer(mconf, opt_conf, checkpoint)
 
     if cfg['charnn']['task'] == 'train':
-        trainer = Trainer(model, optimizer, train_dataset, tconf, device, start_epoch)
+        trainer = Trainer(model, optimizer, train_dataset, tconf, device,
+                          checkpoint.finished_epoch + 1 if checkpoint else 0)
         trainer.fit()
     elif cfg['charnn']['task'] == 'generate':
         generate_seq(cfg, model, train_dataset)

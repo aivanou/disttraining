@@ -12,7 +12,7 @@ class CharDataset(Dataset):
         data = self._read_data(data_path)
         chars = sorted(list(set(data)))
         data_size, vocab_size = len(data), len(chars)
-        print('data has %d characters, %d unique.' % (data_size, vocab_size))
+        print('Data has %d characters, %d unique.' % (data_size, vocab_size))
 
         self.stoi = {ch: i for i, ch in enumerate(chars)}
         self.itos = {i: ch for i, ch in enumerate(chars)}

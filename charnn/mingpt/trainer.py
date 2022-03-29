@@ -5,8 +5,8 @@ so nothing in this file really has anything to do with GPT specifically.
 
 import logging
 import os
-from typing import Optional
-from dataclasses import dataclass
+from typing import Optional, Any, Dict, OrderedDict
+from dataclasses import dataclass, asdict
 
 import torch
 import torch.optim as optim
@@ -30,6 +30,42 @@ class TrainerConfig:
     log_dir: Optional[str] = None
 
 
+@dataclass
+class Checkpoint:
+    model_state: OrderedDict[str, torch.Tensor]
+    optimizer_state: Dict[str, Any]
+    finished_epoch: int
+
+
+def get_raw_model(model: torch.nn.Module) -> torch.nn.Module:
+    return model.module if hasattr(model, "module") else model
+
+
+def save_checkpoint(self, model: torch.nn.Module, optimizer: optim.Optimizer, epoch: int) -> None:
+    if self.config.checkpoint_path and dist.get_rank() == 0:
+        model = get_raw_model(model)
+        checkpoint = Checkpoint(
+            finished_epoch=epoch,
+            model_state=model.state_dict(),
+            optimizer_state=optimizer.state_dict(),
+        )
+        torch.save(asdict(checkpoint), self.config.checkpoint_path)
+
+
+def load_checkpoint(checkpoint_path: Optional[str]) -> Optional[Checkpoint]:
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        # Load checkpoint on CPU. For big models the sequence is:
+        # 1. Create model
+        # 2. Load model state from checkpoint
+        # 3. Move model to GPU
+        # 4. Create optimizer
+        # 5. Load optimizer state from checkpoint
+        checkpoint_data = torch.load(checkpoint_path, map_location="cpu")
+        return Checkpoint(**checkpoint_data)
+    else:
+        return None
+
+
 class Trainer:
 
     def __init__(self,
@@ -49,18 +85,6 @@ class Trainer:
         self.rank = int(os.environ['RANK'])
         self.world_size = int(os.environ['WORLD_SIZE'])
         self.tb_writer = self._get_tb_writer()
-
-    def _get_raw_model(self) -> torch.nn.Module:
-        return self.model.module if hasattr(self.model, "module") else self.model
-
-    def _try_save_checkpoint(self, epoch: int) -> None:
-        if self.config.checkpoint_path and dist.get_rank() == 0:
-            model = self._get_raw_model()
-            torch.save({
-                "epoch": epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-            }, self.config.checkpoint_path)
 
     def _get_log_dir(self) -> str:
         return f"{self.config.log_dir}/{self.config.job_name}"
@@ -119,7 +143,7 @@ class Trainer:
                     prof.step()
                 if it == 20:
                     break
-            self._try_save_checkpoint(epoch)
+            save_checkpoint(self.model, self.optimizer, epoch)
 
         finally:
             if prof:

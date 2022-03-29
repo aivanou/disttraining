@@ -19,14 +19,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class OptimizerConfig:
-    """ base Optimizer config """
     lr: float = 3e-4
     weight_decay: float = 0.1
 
 
 @dataclass
 class GPTConfig:
-    """ base GPT config """
     vocab_size: int
     block_size: int
     n_layer: int
@@ -103,7 +101,7 @@ class GPT(nn.Module):
         self.block_size = config.block_size
         self.apply(self._init_weights)
 
-        print("number of parameters: %e", sum(p.numel() for p in self.parameters()))
+        print("GPT Model Number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
     def get_block_size(self):
         return self.block_size
@@ -167,16 +165,7 @@ def create_optimizer(model: torch.nn.Module, optimizer_config: OptimizerConfig) 
     # special case the position embedding parameter in the root GPT module as not decayed
     no_decay.add('pos_emb')
 
-    # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}
-    inter_params = decay & no_decay
-    union_params = decay | no_decay
-
-    # assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params),)
-    # assert len(
-    #     param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
-    #                                             % (str(param_dict.keys() - union_params),)
-
     # create the pytorch optimizer object
     optim_groups = [
         {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": optimizer_config.weight_decay},
