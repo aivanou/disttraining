@@ -110,8 +110,9 @@ class Trainer:
 
         if self.tb_writer:
             self.tb_writer.add_scalar("batch_loss", loss.item(), it)
-        print(
-            f"{self.rank}: epoch {epoch + 1} iter {it}: train loss {loss.item():.5f}")
+        if it % 5 == 0:
+            print(
+                f"{self.rank}: epoch {epoch + 1} iter {it}: train loss {loss.item():.5f}")
 
     def run_epoch(self, epoch: int) -> None:
         self.model.train(True)
@@ -132,8 +133,6 @@ class Trainer:
                 self.run_batch(epoch, it, x, y)
                 if prof:
                     prof.step()
-                if it == 30:
-                    break
             self._try_save_checkpoint(epoch)
 
         finally:

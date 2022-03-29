@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Optional, Tuple
 from mingpt.model import GPT, GPTConfig, OptimizerConfig, create_optimizer
 from mingpt.trainer import Trainer, TrainerConfig
@@ -83,6 +84,12 @@ def generate_seq(cfg: DictConfig, model: torch.nn.Module, dataset: CharDataset) 
         print(completion)
 
 
+def get_dataset_path() -> str:
+    path = os.path.abspath(__file__)
+    dirname = os.path.dirname(path)
+    return os.path.join(dirname, "data", "input.txt")
+
+
 @hydra.main(config_path=".", config_name="trainer_config")
 def main(cfg: DictConfig):
     set_env()
@@ -93,7 +100,7 @@ def main(cfg: DictConfig):
     setup_process_group()
 
     block_size = 128  # spatial extent of the model for its context
-    train_dataset = CharDataset('./data/input.txt', block_size)
+    train_dataset = CharDataset(get_dataset_path(), block_size)
 
     opt_conf = OptimizerConfig(lr=cfg['opt']['lr'], weight_decay=cfg['opt']['weight_decay'])
 

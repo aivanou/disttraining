@@ -4,25 +4,33 @@ Image:
 HeadNode:
   InstanceType: c4.xlarge
   Networking:
-    SubnetId: subnet-c2b5bcbb
+    # MODIFY THIS TO THE VALUE OF SUBNET ID
+    SubnetId: YOUR_SUBNET_ID
   Ssh:
-    KeyName: aivanou-pem
+    # MODIFY THIS TO THE VALUE OF $AWS_KEY_NAME
+    KeyName: AWS_KEY_NAME
+  Iam:
+    S3Access:
+      # MODIFY THIS TO THE VALUE OF S3_BUCKET_NAME
+      - BucketName: S3_BUCKET_NAME
+
 Scheduling:
   Scheduler: slurm
   SlurmQueues:
-    - Name: test
+    - Name: train
       ComputeResources:
         - Name: p38xlarge
           InstanceType: p3.8xlarge
           MinCount: 0
-          MaxCount: 10
+          MaxCount: 4
         - Name: p32xlarge
           InstanceType: p3.2xlarge
           MinCount: 0
-          MaxCount: 10
+          MaxCount: 4
       Networking:
         SubnetIds:
-          - subnet-c2b5bcbb
+          # MODIFY THIS TO THE VALUE OF SUBNET ID
+          - YOUR_SUBNET_ID
 Monitoring:
   DetailedMonitoring: true
   Logs:
@@ -39,10 +47,9 @@ SharedStorage:
     FsxLustreSettings:
       StorageCapacity: 1200
       DeploymentType: SCRATCH_1
-      #      FileSystemId: string
       StorageType: SSD
 
 
 Tags:
   - Key: cluster
-    Value: aivanou-test
+    Value: train-cluster
