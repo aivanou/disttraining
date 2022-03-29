@@ -1,7 +1,8 @@
 opt:
   lr: 0.0006
   weight_decay: 0.1
-dataset: ./data/input.txt
+dataset:
+  path: ./data/input.txt
 trainer:
   max_epochs: 2
   lr: 0.0006

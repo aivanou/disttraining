@@ -89,7 +89,7 @@ def get_dataset_path() -> str:
     dirname = os.path.dirname(path)
     return os.path.join(dirname, "data", "input.txt")
 
-
+import fsspec
 @hydra.main(config_path=".", config_name="trainer_config")
 def main(cfg: DictConfig):
     set_env()

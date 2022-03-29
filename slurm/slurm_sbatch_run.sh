@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=aivanou-test1
+#SBATCH --job-name=charnn-trainer
 
 #SBATCH --ntasks=2
 
@@ -16,6 +16,4 @@ head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 echo Node IP: $head_node_ip
 export LOGLEVEL=INFO
 
-#srun python3 test.py
-
-srun python -m torch.distributed.run --nnodes 2 --nproc_per_node 2 --rdzv_id $RANDOM --rdzv_backend c10d --rdzv_endpoint $head_node_ip:29500 main.py --mode ddp --batch_size 256
+srun python -m torch.distributed.run --nnodes 2 --nproc_per_node 2 --rdzv_id $RANDOM --rdzv_backend c10d --rdzv_endpoint $head_node_ip:29500 ./charnn/main.py dataset.path=s3://$S3_BUCKET_NAME/charnn/data/input.txt

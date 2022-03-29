@@ -72,25 +72,36 @@ mounted at `/shared` destination. We will be using this folder for storage
 
 Lets install venv there:
 
-```commandline
+```bash
 sudo apt-get update
 sudo apt-get install python3-venv
 python3 -m venv /shared/venv/
 source /shared/venv/bin/activate
+pip install wheel
+echo 'source /shared/venv/bin/activate' >> ~/.bashrc
 ```
 
 Now lets download the source code there:
 
-```commandline
+```bash
 mkdir /shared/code
 cd /shared/code/
 git clone https://github.com/aivanou/disttraining.git 
 cd disttraining
+# NOTE: Important to do, due to https://github.com/pytorch/pytorch/pull/69904 bug
+python3 -m pip install setuptools==59.5.0
+pip install -r requirements.txt
 ```
 
 Now we can run our training job via the following cmd:
 
-```commandline
-./charnn/slurm_sbatch_run.sh
+```bash
+sbatch ./slurm/slurm_sbatch_run.sh
+```
+
+Check that the job is in the queue:
+
+```bash
+squeue
 ```
 

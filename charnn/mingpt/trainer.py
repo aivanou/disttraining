@@ -3,32 +3,20 @@ Simple training loop; Boilerplate that could apply to any arbitrary neural netwo
 so nothing in this file really has anything to do with GPT specifically.
 """
 
-import uuid
-import time
-import math
 import logging
 import os
-
-from tqdm import tqdm
-import numpy as np
+from typing import Optional
+from dataclasses import dataclass
 
 import torch
-from torch.utils.data import Dataset
 import torch.optim as optim
-from torch.optim.lr_scheduler import LambdaLR
-import socket
-from dataclasses import dataclass
 import torch.distributed as dist
-from typing import Optional
+from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 logger = logging.getLogger(__name__)
-
-
-def get_fq_hostname() -> str:
-    return socket.getfqdn(socket.gethostname())
 
 
 @dataclass

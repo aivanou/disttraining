@@ -1,3 +1,7 @@
+import os
+import tempfile
+import fsspec
+
 import torch
 from torch.utils.data import Dataset
 
@@ -5,7 +9,7 @@ from torch.utils.data import Dataset
 class CharDataset(Dataset):
 
     def __init__(self, data_path: str, block_size):
-        data = open(data_path, 'r').read()
+        data = self._read_data(data_path)
         chars = sorted(list(set(data)))
         data_size, vocab_size = len(data), len(chars)
         print('data has %d characters, %d unique.' % (data_size, vocab_size))
@@ -15,6 +19,15 @@ class CharDataset(Dataset):
         self.block_size = block_size
         self.vocab_size = vocab_size
         self.data = data
+
+    def _read_data(self, data_path: str) -> str:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fs, _, rpaths = fsspec.get_fs_token_paths(data_path)
+            local_file = os.path.join(tmpdir, "input.txt")
+
+            fs.get(rpaths[0], local_file)
+            data = open(local_file, 'r').read()
+            return data
 
     def __len__(self):
         return len(self.data) - self.block_size
