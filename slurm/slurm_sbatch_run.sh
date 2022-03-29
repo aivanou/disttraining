@@ -22,4 +22,4 @@ srun python -m torch.distributed.run \
 --rdzv_id $RANDOM \
 --rdzv_backend c10d \
 --rdzv_endpoint $head_node_ip:29500 \
-./charnn/main.py dataset.path=/shared/data/input.txt +trainer.checkpoint_path=/shared/model/charnn.pt
+./charnn/main.py dataset.path=/shared/data/input.txt +trainer.checkpoint_path=/shared/model/charnn.pt + trainer.log_dir=/shared/logs

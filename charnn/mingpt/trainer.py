@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TrainerConfig:
+    job_name: str
     max_epochs: int = 10
     batch_size: int = 64
     checkpoint_path: Optional[str] = None
@@ -61,9 +62,12 @@ class Trainer:
                 'optimizer_state_dict': self.optimizer.state_dict(),
             }, self.config.checkpoint_path)
 
+    def _get_log_dir(self) -> str:
+        return f"{self.config.log_dir}/{self.config.job_name}"
+
     def _get_tb_writer(self) -> Optional[SummaryWriter]:
         if self.config.log_dir:
-            return SummaryWriter(log_dir=self.config.log_dir)
+            return SummaryWriter(log_dir=self._get_log_dir())
         else:
             return None
 
@@ -76,7 +80,7 @@ class Trainer:
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(self.config.log_dir),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(self._get_log_dir()),
         )
 
     def run_batch(self, epoch, it, x, y):

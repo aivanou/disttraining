@@ -103,7 +103,8 @@ def main(cfg: DictConfig):
     set_env()
     device = get_device()
     data_path = get_dataset_path(cfg)
-    print(f"{get_fq_hostname()}:{os.getpid()}:{device} Running charNN, data_path: {data_path}")
+    job_name = get_job_name()
+    print(f"{get_fq_hostname()}:{os.getpid()}:{device} Running charNN {job_name}, data_path: {data_path}")
     if device is not None:
         torch.cuda.set_device(device)
     setup_process_group()
@@ -120,13 +121,13 @@ def main(cfg: DictConfig):
                       n_embd=cfg['model']['n_embd'])
 
     train_cfg = cfg['trainer']
-    tconf = TrainerConfig(max_epochs=train_cfg['max_epochs'],
+    tconf = TrainerConfig(job_name=job_name,
+                          max_epochs=train_cfg['max_epochs'],
                           batch_size=train_cfg['batch_size'],
                           data_loader_workers=train_cfg['data_loader_workers'],
                           enable_profile=train_cfg['enable_profile'],
                           log_dir=train_cfg.get('log_dir'),
-                          checkpoint_path=train_cfg.get("checkpoint_path"),
-                          )
+                          checkpoint_path=train_cfg.get("checkpoint_path"), )
     model, optimizer, start_epoch = get_model_and_optimizer(mconf, opt_conf, tconf)
 
     if cfg['charnn']['task'] == 'train':

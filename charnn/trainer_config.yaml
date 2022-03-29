@@ -10,6 +10,7 @@ trainer:
   data_loader_workers: 4
   enable_profile: False
   # checkpoint_path
+  # log_dir
 model:
   n_layer: 8
   n_head: 8
