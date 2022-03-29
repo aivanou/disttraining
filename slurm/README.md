@@ -61,7 +61,7 @@ This command should use cloudformation to create the cluster.
 
 Run the following cmd to access the cluster HeadNode:
 
-```commandline
+```bash
 pcluster ssh --cluster-name $CLUSTER_NAME -i ~/.ssh/$AWS_KEY_NAME.pem
 ```
 
@@ -96,6 +96,7 @@ pip install -r requirements.txt
 Now we can run our training job via the following cmd:
 
 ```bash
+export S3_BUCKET_NAME=#YOUR_BUCKET_NAME
 sbatch ./slurm/slurm_sbatch_run.sh
 ```
 
@@ -104,4 +105,3 @@ Check that the job is in the queue:
 ```bash
 squeue
 ```
-

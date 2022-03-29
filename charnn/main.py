@@ -84,23 +84,27 @@ def generate_seq(cfg: DictConfig, model: torch.nn.Module, dataset: CharDataset) 
         print(completion)
 
 
-def get_dataset_path() -> str:
-    path = os.path.abspath(__file__)
-    dirname = os.path.dirname(path)
-    return os.path.join(dirname, "data", "input.txt")
+def get_dataset_path(cfg: DictConfig) -> str:
+    if cfg['dataset']['path'] == './data/input.txt':
+        path = os.path.abspath(__file__)
+        dirname = os.path.dirname(path)
+        return os.path.join(dirname, "data", "input.txt")
+    else:
+        return cfg['dataset']['path']
 
-import fsspec
+
 @hydra.main(config_path=".", config_name="trainer_config")
 def main(cfg: DictConfig):
     set_env()
     device = get_device()
-    print(f"{get_fq_hostname()}:{os.getpid()}:{device} Running charNN")
+    data_path = get_dataset_path(cfg)
+    print(f"{get_fq_hostname()}:{os.getpid()}:{device} Running charNN, data_path: {data_path}")
     if device is not None:
         torch.cuda.set_device(device)
     setup_process_group()
 
     block_size = 128  # spatial extent of the model for its context
-    train_dataset = CharDataset(get_dataset_path(), block_size)
+    train_dataset = CharDataset(data_path, block_size)
 
     opt_conf = OptimizerConfig(lr=cfg['opt']['lr'], weight_decay=cfg['opt']['weight_decay'])
 
