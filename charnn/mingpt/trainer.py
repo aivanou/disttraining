@@ -41,15 +41,18 @@ def get_raw_model(model: torch.nn.Module) -> torch.nn.Module:
     return model.module if hasattr(model, "module") else model
 
 
-def save_checkpoint(self, model: torch.nn.Module, optimizer: optim.Optimizer, epoch: int) -> None:
-    if self.config.checkpoint_path and dist.get_rank() == 0:
+def save_checkpoint(checkpoint_path: Optional[str],
+                    model: torch.nn.Module,
+                    optimizer: optim.Optimizer,
+                    epoch: int) -> None:
+    if checkpoint_path and dist.get_rank() == 0:
         model = get_raw_model(model)
         checkpoint = Checkpoint(
             finished_epoch=epoch,
             model_state=model.state_dict(),
             optimizer_state=optimizer.state_dict(),
         )
-        torch.save(asdict(checkpoint), self.config.checkpoint_path)
+        torch.save(asdict(checkpoint), checkpoint_path)
 
 
 def load_checkpoint(checkpoint_path: Optional[str]) -> Optional[Checkpoint]:
@@ -143,7 +146,7 @@ class Trainer:
                     prof.step()
                 if it == 20:
                     break
-            save_checkpoint(self.model, self.optimizer, epoch)
+            save_checkpoint(self.config.checkpoint_path, self.model, self.optimizer, epoch)
 
         finally:
             if prof:
