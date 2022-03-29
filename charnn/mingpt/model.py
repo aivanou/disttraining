@@ -1,4 +1,12 @@
+#!/usr/bin/env python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
+The model taken form https://github.com/karpathy/minGPT
 GPT model:
 - the initial stem consists of a combination of token encoding and a positional encoding
 - the meat of it is a uniform sequence of Transformer blocks
