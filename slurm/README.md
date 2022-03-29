@@ -23,7 +23,9 @@ aws s3 mb s3://${S3_BUCKET_NAME}
 
 #### Upload train data to the s3 bucket
 
+```bash
 aws s3 cp ../charnn/data/input.txt s3://$S3_BUCKET_NAME/charnn/data/input.txt
+```
 
 The data will be accessible via `s3://$S3_BUCKET_NAME/charnn/data/input.txt`.
 
