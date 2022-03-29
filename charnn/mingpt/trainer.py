@@ -5,7 +5,8 @@ so nothing in this file really has anything to do with GPT specifically.
 
 import logging
 import os
-from typing import Optional, Any, Dict, OrderedDict
+from typing import Optional, Any, Dict
+from collections import OrderedDict
 from dataclasses import dataclass, asdict
 
 import torch
@@ -32,7 +33,7 @@ class TrainerConfig:
 
 @dataclass
 class Checkpoint:
-    model_state: OrderedDict[str, torch.Tensor]
+    model_state: 'OrderedDict[str, torch.Tensor]'
     optimizer_state: Dict[str, Any]
     finished_epoch: int
 
@@ -144,8 +145,6 @@ class Trainer:
                 self.run_batch(epoch, it, x, y)
                 if prof:
                     prof.step()
-                if it == 20:
-                    break
             save_checkpoint(self.config.checkpoint_path, self.model, self.optimizer, epoch)
 
         finally:

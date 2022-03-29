@@ -112,3 +112,9 @@ Check that the job is in the queue:
 ```bash
 squeue
 ```
+
+When job finished lets generate some output:
+
+```bash
+python charnn/main.py charnn.task=generate +trainer.checkpoint_path=/shared/model/charnn.pt
+```
