@@ -24,7 +24,19 @@ Running on multiple GPUs on a single host:
 ```bash
 torchrun --nnodes 1 --nproc_per_node 4 \
 --rdzv_backend c10d \
---rdzv_endpoint localhost:29500 charnn/main.py
+--rdzv_endpoint localhost:29500 apps/charnn/main.py
+```
+
+Run with checkpoint:
+
+```bash
+mkdir -p logs/tb
+
+torchrun --nnodes 1 --nproc_per_node 4 \
+--rdzv_backend c10d \
+--rdzv_endpoint localhost:29500 apps/charnn/main.py \
++trainer.checkpoint_path=./logs/model.pt \
++trainer.log_dir=./logs/tb
 ```
 
 Setting up SLURM cluster and executing job in [SLURM](slurm/README.md)

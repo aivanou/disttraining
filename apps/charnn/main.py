@@ -7,12 +7,16 @@
 
 import os
 from typing import Optional, Tuple
-from mingpt.model import GPT, GPTConfig, OptimizerConfig, create_optimizer
-from mingpt.trainer import Trainer, TrainerConfig, Checkpoint, load_checkpoint
-from mingpt.char_dataset import CharDataset
-from mingpt.utils import sample
+from model import GPT, GPTConfig, OptimizerConfig, create_optimizer
+from model_fsdp import ShardedGPT
+from trainer import Trainer, TrainerConfig, Checkpoint, load_checkpoint
+from char_dataset import CharDataset
+from utils import sample
 from torch.nn.parallel import DistributedDataParallel
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, CPUOffload
 import torch.distributed as dist
+from torch.utils.data import random_split
 import uuid
 
 import torch
@@ -46,7 +50,7 @@ def get_device() -> Optional[int]:
     return int(os.environ['LOCAL_RANK'])
 
 
-def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, checkpoint: Optional[Checkpoint]) \
+def get_ddp_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, checkpoint: Optional[Checkpoint]) \
         -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
     # Create new GPT Model on CPU
     model = GPT(gpt_config)
@@ -66,6 +70,27 @@ def get_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, 
         device_ids=device_ids,
     )
     return model, optimizer
+
+
+def get_fsdp_model_and_optimizer(gpt_config: GPTConfig, opt_config: OptimizerConfig, checkpoint: Optional[Checkpoint]) \
+        -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    device = get_device()
+    with enable_wrap(wrapper_cls=FSDP, cpu_offload=CPUOffload(offload_params=True)):
+        model = wrap(
+            ShardedGPT(gpt_config, device=device, dtype=torch.float32, activation="offload"))
+    optimizer = torch.optim.Adam(model.parameters(), lr=opt_config.lr)
+    return model, optimizer
+
+
+def get_model_and_optimizer(type: str, gpt_config: GPTConfig, opt_config: OptimizerConfig,
+                            checkpoint: Optional[Checkpoint]) \
+        -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+    if type == "ddp":
+        return get_ddp_model_and_optimizer(gpt_config, opt_config, checkpoint)
+    elif type == "fsdp":
+        return get_fsdp_model_and_optimizer(gpt_config, opt_config, checkpoint)
+    else:
+        raise RuntimeError(f"Unknown type: {type}. Allowed values: [ddp, fsdp]")
 
 
 def setup_process_group() -> None:
@@ -89,7 +114,8 @@ def generate_seq(cfg: DictConfig, model: torch.nn.Module, dataset: CharDataset) 
 
 
 def get_dataset_path(cfg: DictConfig) -> str:
-    if cfg['dataset']['path'] == './data/input.txt':
+    default_path = './data/input.txt'
+    if cfg['dataset']['path'] == default_path:
         path = os.path.abspath(__file__)
         dirname = os.path.dirname(path)
         return os.path.join(dirname, "data", "input.txt")
@@ -109,12 +135,17 @@ def main(cfg: DictConfig):
     setup_process_group()
 
     block_size = 128  # spatial extent of the model for its context
-    train_dataset = CharDataset(data_path, block_size)
+    dataset = CharDataset(data_path, block_size)
+
+    datalen = len(dataset)
+    train_len = int(datalen * 0.9)
+
+    train_dataset, test_dataset = random_split(dataset, [train_len, datalen - train_len])
 
     opt_conf = OptimizerConfig(lr=cfg['opt']['lr'], weight_decay=cfg['opt']['weight_decay'])
 
-    mconf = GPTConfig(vocab_size=train_dataset.vocab_size,
-                      block_size=train_dataset.block_size,
+    mconf = GPTConfig(vocab_size=dataset.vocab_size,
+                      block_size=dataset.block_size,
                       n_layer=cfg['model']['n_layer'],
                       n_head=cfg['model']['n_head'],
                       n_embd=cfg['model']['n_embd'])
@@ -128,10 +159,10 @@ def main(cfg: DictConfig):
                           log_dir=train_cfg.get('log_dir'),
                           checkpoint_path=train_cfg.get("checkpoint_path"), )
     checkpoint = load_checkpoint(tconf.checkpoint_path)
-    model, optimizer = get_model_and_optimizer(mconf, opt_conf, checkpoint)
+    model, optimizer = get_model_and_optimizer(cfg['charnn']['dist'], mconf, opt_conf, checkpoint)
 
     if cfg['charnn']['task'] == 'train':
-        trainer = Trainer(model, optimizer, train_dataset, tconf, device,
+        trainer = Trainer(model, optimizer, train_dataset, test_dataset, tconf, device,
                           checkpoint.finished_epoch + 1 if checkpoint else 0)
         trainer.fit()
     elif cfg['charnn']['task'] == 'generate':

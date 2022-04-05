@@ -79,12 +79,14 @@ class Trainer:
                  model: torch.nn.Module,
                  optimizer: optim.Optimizer,
                  train_dataset: Dataset,
+                 test_dataset: Dataset,
                  config: TrainerConfig,
                  device: Optional[int] = None,
                  start_epoch: int = 0):
         self.model = model
         self.optimizer = optimizer
         self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
         self.config = config
         self.start_epoch = start_epoch
 
@@ -94,7 +96,7 @@ class Trainer:
         self.tb_writer = self._get_tb_writer()
 
     def _get_log_dir(self) -> str:
-        return f"{self.config.log_dir}/{self.config.job_name}"
+        return f"{self.config.log_dir}/{self.config.job_name}/{self.rank}"
 
     def _get_tb_writer(self) -> Optional[SummaryWriter]:
         if self.config.log_dir:
@@ -105,6 +107,8 @@ class Trainer:
     def _try_create_profiler(self) -> Optional[torch.profiler.profile]:
         if not self.config.enable_profile:
             return None
+        if self.config.log_dir is None:
+            raise RuntimeError("In order to use profiling pass the log dir `+trainer.log_dir=#YOUR_LOG_DIR`")
         return torch.profiler.profile(
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=5),
             activities=[
@@ -114,40 +118,60 @@ class Trainer:
             on_trace_ready=torch.profiler.tensorboard_trace_handler(self._get_log_dir()),
         )
 
-    def run_batch(self, epoch, it, x, y):
-        with torch.set_grad_enabled(True):
+    def run_batch(self, x, y, train: bool = True) -> float:
+        with torch.set_grad_enabled(train):
             _, loss = self.model(x, y)
 
-        self.model.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
+        if train:
+            self.model.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.optimizer.step()
 
-        if self.tb_writer:
-            self.tb_writer.add_scalar("batch_loss", loss.item(), it)
-        if it % 5 == 0:
-            print(
-                f"{self.rank}: epoch {epoch + 1} iter {it}: train loss {loss.item():.5f}")
+        return loss.item()
 
     def run_epoch(self, epoch: int) -> None:
-        self.model.train(True)
-        data = self.train_dataset
-        train_sampler = DistributedSampler(data, rank=self.rank, num_replicas=self.world_size, shuffle=True)
-        loader = DataLoader(data,
-                            pin_memory=True,
-                            batch_size=self.config.batch_size,
-                            num_workers=self.config.data_loader_workers,
-                            sampler=train_sampler
-                            )
+        train_sampler = DistributedSampler(self.train_dataset, rank=self.rank, num_replicas=self.world_size,
+                                           shuffle=True)
+        train_loader = DataLoader(self.train_dataset,
+                                  pin_memory=True,
+                                  batch_size=self.config.batch_size,
+                                  num_workers=self.config.data_loader_workers,
+                                  sampler=train_sampler
+                                  )
+
+        test_loader = DataLoader(self.test_dataset,
+                                 pin_memory=True,
+                                 batch_size=self.config.batch_size,
+                                 num_workers=self.config.data_loader_workers,
+                                 )
 
         prof = self._try_create_profiler()
         try:
-            for it, (x, y) in enumerate(loader):
+            self.model.train()
+            for it, (x, y) in enumerate(train_loader):
                 x = x.to(self.device)
                 y = y.to(self.device)
-                self.run_batch(epoch, it, x, y)
+                train_batch_loss = self.run_batch(x, y, train=True)
                 if prof:
                     prof.step()
+                if self.tb_writer:
+                    self.tb_writer.add_scalar(f"train_loss_{epoch}", train_batch_loss, it)
+                if it % 100 == 0:
+                    print(
+                        f"{self.rank}: epoch {epoch + 1} iter {it}: train loss {train_batch_loss:.5f}")
+
+            self.model.eval()
+            for it, (x, y) in enumerate(test_loader):
+                x = x.to(self.device)
+                y = y.to(self.device)
+                test_batch_loss = self.run_batch(x, y, train=False)
+                if self.tb_writer:
+                    self.tb_writer.add_scalar(f"test_loss_{epoch}", test_batch_loss, it)
+                if it % 100 == 0:
+                    print(
+                        f"{self.rank}: epoch {epoch + 1} iter {it}: test loss {test_batch_loss:.5f}")
+
             save_checkpoint(self.config.checkpoint_path, self.model, self.optimizer, epoch)
 
         finally:

@@ -17,10 +17,15 @@ GPT model:
 
 from dataclasses import dataclass
 import logging
+import os
+from functools import partial
+import math
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.distributed.fsdp.wrap import wrap
+from torch.distributed.algorithms._checkpoint._checkpoint_wrapper import checkpoint_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,20 @@ logger = logging.getLogger(__name__)
 class OptimizerConfig:
     lr: float = 3e-4
     weight_decay: float = 0.1
+
+
+def module_wrapper(module, fsdp=False, activation="noop"):
+    if not fsdp:
+        return module
+
+    if activation == "noop":
+        return wrap(module)
+    elif activation == "checkpoint":
+        return wrap(checkpoint_wrapper(module))
+    elif activation == "offload":
+        return wrap(checkpoint_wrapper(module, offload_to_cpu=True))
+    else:
+        raise ValueError(f"Unrecognized activation mode {activation}")
 
 
 @dataclass
@@ -43,16 +62,37 @@ class GPTConfig:
     attn_pdrop: float = 0.1
 
 
+class EmbeddingStem(nn.Module):
+    def __init__(self, config: GPTConfig, device="cpu", dtype=torch.float32):
+        super().__init__()
+
+        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd, device=device, dtype=dtype)
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd, device=device, dtype=dtype))
+        self.drop = nn.Dropout(config.embd_pdrop)
+        self.block_size = config.block_size
+
+    def reset_parameters(self):
+        self.tok_emb.reset_parameters()
+
+    def forward(self, idx):
+        b, t = idx.size()
+        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
+
+        token_embeddings = self.tok_emb(idx)  # each index maps to a (learnable) vector
+        position_embeddings = self.pos_emb[:, :t, :]  # each position maps to a (learnable) vector
+        return self.drop(token_embeddings + position_embeddings)
+
+
 class MultiheadAttentionLayer(nn.Module):
     """
     A multi-head masked self-attention layer with a projection at the end.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, device="cpu", dtype=torch.float32):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.resid_drop = nn.Dropout(config.resid_pdrop)
-        self.proj = nn.Linear(config.n_embd, config.n_embd)
+        self.proj = nn.Linear(config.n_embd, config.n_embd, device=device, dtype=dtype)
         self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
                              .view(1, 1, config.block_size, config.block_size))
         self.attn = torch.nn.MultiheadAttention(
@@ -60,6 +100,8 @@ class MultiheadAttentionLayer(nn.Module):
             num_heads=config.n_head,
             dropout=config.attn_pdrop,
             batch_first=True,
+            device=device,
+            dtype=dtype
         )
 
     def forward(self, x):
@@ -97,9 +139,7 @@ class GPT(nn.Module):
         super().__init__()
 
         # input embedding stem
-        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.block_size, config.n_embd))
-        self.drop = nn.Dropout(config.embd_pdrop)
+        self.emb_stem = EmbeddingStem(config)
         # transformer
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         # decoder head
@@ -108,8 +148,10 @@ class GPT(nn.Module):
 
         self.block_size = config.block_size
         self.apply(self._init_weights)
+        rank = int(os.getenv("RANK", "0"))
 
-        print("GPT Model Number of parameters: %e", sum(p.numel() for p in self.parameters()))
+        if rank == 0:
+            print("GPT Model Number of parameters: ", sum(p.numel() for p in self.parameters()))
 
     def get_block_size(self):
         return self.block_size
@@ -128,14 +170,10 @@ class GPT(nn.Module):
         assert t <= self.block_size, "Cannot forward, model block size is exhausted."
 
         # forward the GPT model
-        token_embeddings = self.tok_emb(idx)  # each index maps to a (learnable) vector
-        position_embeddings = self.pos_emb[:, :t, :]  # each position maps to a (learnable) vector
-        x = self.drop(token_embeddings + position_embeddings)
+        x = self.emb_stem(idx)
         x = self.blocks(x)
         x = self.ln_f(x)
         logits = self.head(x)
-
-        # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
@@ -171,7 +209,7 @@ def create_optimizer(model: torch.nn.Module, optimizer_config: OptimizerConfig) 
                 no_decay.add(fpn)
 
     # special case the position embedding parameter in the root GPT module as not decayed
-    no_decay.add('pos_emb')
+    # no_decay.add('pos_emb')
 
     param_dict = {pn: p for pn, p in model.named_parameters()}
     # create the pytorch optimizer object

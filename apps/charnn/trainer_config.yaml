@@ -16,6 +16,8 @@ model:
   n_head: 8
   n_embd: 512
 charnn:
+  # ddp, fsdp
+  dist: ddp
   # train or generate
   task: train
   # start string
@@ -24,3 +26,4 @@ charnn:
 hydra:
   run:
     dir: ./
+
