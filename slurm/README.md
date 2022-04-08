@@ -77,7 +77,7 @@ Lets install venv there:
 ```bash
 sudo apt-get update
 sudo apt-get install python3-venv
-python3 -m venv /shared/venv/
+python3.7 -m venv /shared/venv/
 source /shared/venv/bin/activate
 pip install wheel
 echo 'source /shared/venv/bin/activate' >> ~/.bashrc
